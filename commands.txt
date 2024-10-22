@@ -1,0 +1,4 @@
+PGPT_PROFILES=ollama make run
+poetry install --all-extras  
+ PGPT_PROFILES=local make run
+poetry run python scripts/setup

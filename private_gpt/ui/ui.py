@@ -32,7 +32,7 @@ THIS_DIRECTORY_RELATIVE = Path(__file__).parent.relative_to(PROJECT_ROOT_PATH)
 # Should be "private_gpt/ui/avatar-bot.ico"
 AVATAR_BOT = THIS_DIRECTORY_RELATIVE / "avatar-bot.ico"
 
-UI_TAB_TITLE = "My Private GPT"
+UI_TAB_TITLE = "LegalGPT"
 
 SOURCES_SEPARATOR = "<hr>Sources: \n"
 
@@ -377,7 +377,7 @@ class PrivateGptUi:
             "justify-content: center;"
             "align-items: center;"
             "}"
-            ".logo img { height: 25% }"
+            ".logo img { height: 35% }"
             ".contain { display: flex !important; flex-direction: column !important; }"
             "#component-0, #component-3, #component-10, #component-8  { height: 100% !important; }"
             "#chatbot { flex-grow: 1 !important; overflow: auto !important;}"
@@ -565,7 +565,7 @@ class PrivateGptUi:
                 avatar_byte = AVATAR_BOT.read_bytes()
                 f_base64 = f"data:image/png;base64,{base64.b64encode(avatar_byte).decode('utf-8')}"
                 gr.HTML(
-                    f"<div class='footer'><a class='footer-zylon-link' href='https://zylon.ai/'>Maintained by Zylon <img class='footer-zylon-ico' src='{f_base64}' alt=Zylon></a></div>"
+                    f"<div class='footer'><a class='footer-zylon-link' href='https://zylon.ai/'>Maintained by Yatharth <img class='footer-zylon-ico' src='{f_base64}' alt=Zylon></a></div>"
                 )
 
         return blocks
