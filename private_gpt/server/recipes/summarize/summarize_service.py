@@ -1,5 +1,4 @@
 from itertools import chain
-
 from injector import inject, singleton
 from llama_index.core import (
     Document,
@@ -7,7 +6,7 @@ from llama_index.core import (
     SummaryIndex,
 )
 from llama_index.core.base.response.schema import Response, StreamingResponse
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.node_parser import SemanticSplitterNodeParser  # Updated
 from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.core.storage.docstore.types import RefDocInfo
 from llama_index.core.types import TokenGen
@@ -21,14 +20,15 @@ from private_gpt.components.vector_store.vector_store_component import (
 from private_gpt.open_ai.extensions.context_filter import ContextFilter
 from private_gpt.settings.settings import Settings
 
-DEFAULT_SUMMARIZE_PROMPT = (
-    "Provide a comprehensive summary of the provided context information. "
-    "The summary should cover all the key points and main ideas presented in "
-    "the original text, while also condensing the information into a concise "
-    "and easy-to-understand format. Please ensure that the summary includes "
-    "relevant details and examples that support the main ideas, while avoiding "
-    "any unnecessary information or repetition."
-)
+DEFAULT_SUMMARIZE_PROMPT = """
+    You are a legal analyst specializing in Indian law, known for highly accurate and detailed summaries of case documents.
+    Summarize this legal document by focusing on essential facts and details relevant to the case. 
+    Include critical aspects such as the ruling, main arguments, applicable laws, sections, articles, 
+    hearing details, petitions, cited cases, citations, participants, panelists, names of judges, victims, 
+    petitioners,facts of the Case,Procedural History(district court case summary, appeals court case summary, 
+    how this issue reached this Court) and any legally significant information. Please ensure the summary is concise, fact-focused, 
+    and retains all important points without unnecessary information or repetition. It should be a single coherent paragraph.
+"""
 
 
 @singleton
@@ -81,11 +81,10 @@ class SummarizeService:
         # Add text to summarize
         if text:
             text_documents = [Document(text=text)]
-            nodes_to_summarize += (
-                SentenceSplitter.from_defaults().get_nodes_from_documents(
-                    text_documents
-                )
-            )
+            nodes_to_summarize += SemanticSplitterNodeParser(
+                buffer_size=4,  # Adjust based on document complexity
+                breakpoint_percentile_threshold=95,  # Standard for semantic splitting
+            ).get_nodes_from_documents(text_documents)
 
         # Add context documents to summarize
         if use_context:
@@ -117,7 +116,6 @@ class SummarizeService:
         )
 
         # Make a tree summarization query
-        # above the set of all candidate nodes
         query_engine = summary_index.as_query_engine(
             llm=self.llm_component.llm,
             response_mode=ResponseMode.TREE_SUMMARIZE,
@@ -126,7 +124,6 @@ class SummarizeService:
         )
 
         prompt = prompt or DEFAULT_SUMMARIZE_PROMPT
-
         summarize_query = prompt + "\n" + (instructions or "")
 
         response = query_engine.query(summarize_query)

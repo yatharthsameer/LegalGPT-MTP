@@ -1,0 +1,1 @@
+{"name":"Local: test","url":"/Users/sameer/Desktop/private-gpt/private_gpt/server/recipes/summarize/test.py","tests":[{"id":1731235141795,"input":"","output":""}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"/Users/sameer/Desktop/private-gpt/private_gpt/server/recipes/summarize/test.py","group":"local","local":true}

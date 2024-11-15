@@ -1,5 +1,3 @@
-"""This file should be imported if and only if you want to run the UI locally."""
-
 import base64
 import logging
 import time
@@ -219,7 +217,8 @@ class PrivateGptUi:
                     docs_ids = []
                     for ingested_document in self._ingest_service.list_ingested():
                         if (
-                            ingested_document.doc_metadata["file_name"]
+                            ingested_document.doc_metadata
+                            and ingested_document.doc_metadata["file_name"]
                             == self._selected_filename
                         ):
                             docs_ids.append(ingested_document.doc_id)
@@ -295,11 +294,13 @@ class PrivateGptUi:
             files.add(file_name)
         return [[row] for row in files]
 
+    from pathlib import Path
+
     def _upload_file(self, files: list[str]) -> None:
         logger.debug("Loading count=%s files", len(files))
         paths = [Path(file) for file in files]
 
-        # remove all existing Documents with name identical to a new file upload:
+        # Remove all existing Documents with the same name as any new file upload
         file_names = [path.name for path in paths]
         doc_ids_to_delete = []
         for ingested_document in self._ingest_service.list_ingested():
@@ -316,7 +317,121 @@ class PrivateGptUi:
             for doc_id in doc_ids_to_delete:
                 self._ingest_service.delete(doc_id)
 
+        # Ingest the files
         self._ingest_service.bulk_ingest([(str(path.name), path) for path in paths])
+
+        # Generate summaries and save them as .txt files in the specified directory
+
+        SUMMARY_OUTPUT_DIR = Path("/Users/sameer/Desktop/private-gpt/summaries/")
+        SUMMARY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+
+        for path in paths:
+            self._selected_filename = path.name  # Set the file as selected for context
+            summary_text = self._get_summary_text()
+            summary_file_path = (
+                SUMMARY_OUTPUT_DIR / f"{path.stem}.txt"
+            )  # Save in the summaries directory
+
+            # Write the summary to a .txt file in the specified directory
+            with summary_file_path.open("w", encoding="utf-8") as summary_file:
+                summary_file.write(summary_text)
+
+            logger.info(f"Summary saved to {summary_file_path}")
+
+    def _get_summary_text(self) -> str:
+        """
+        Generates and returns the summary text of the selected file.
+        """
+        if not self._selected_filename:
+            logger.warning("No file selected for summarization.")
+            return "No file selected."
+
+        # Set up a context filter based on the selected file
+        context_filter = None
+        docs_ids = []
+        for ingested_document in self._ingest_service.list_ingested():
+            if (
+                ingested_document.doc_metadata
+                and ingested_document.doc_metadata["file_name"] == self._selected_filename
+            ):
+                docs_ids.append(ingested_document.doc_id)
+        if docs_ids:
+            context_filter = ContextFilter(docs_ids=docs_ids)
+
+        # Use the summarize service to get the summary stream
+        summary_stream = self._summarize_service.stream_summarize(
+            use_context=True,
+            context_filter=context_filter,
+            instructions="Summarize the content of the selected file.",
+        )
+
+        # Collect the streamed summary response
+        full_summary = ""
+        for token in summary_stream:
+            full_summary += str(token)
+
+        return full_summary
+    def generate_suggested_questions(self) -> None:
+        """
+        Generates 3 suggested questions based on the summary and chat history.
+        Prints the JSON output to the console.
+        """
+        # Step 1: Get the summary of the selected document
+        if not self._selected_filename:
+            logger.warning("No file selected for summarization.")
+            return
+
+        summary_text = self._get_summary_text()
+
+        # Step 2: Retrieve the chat history
+        history_messages = self._build_chat_history()
+
+        # Step 3: Format the prompt with summary and chat history
+        prompt_instruction = (
+            f"Based on the summary and the chat history draft 3 suggested questions "
+            f"that the user might want to ask next. Give them in a JSON format like this: "
+            f'{{"question1":"", "question2":"", "question3":""}}. '
+            f"Nothing else should be generated. Your response should only be the JSON.\n\n"
+            f"Summary:\n{summary_text}\n\nChat History:\n"
+        )
+
+        # Add the user-assistant exchanges to the prompt
+        for message in history_messages:
+            role = "User" if message.role == MessageRole.USER else "Assistant"
+            prompt_instruction += f"{role}: {message.content}\n"
+
+        # Step 4: Send prompt to LLM in BASIC_CHAT_MODE and print the response
+        response_generator = self._chat_service.stream_chat(
+            messages=[ChatMessage(content=prompt_instruction, role=MessageRole.USER)],
+            use_context=False,
+        )
+
+        # Collect and print the response
+        generated_output = ""
+        for response in response_generator:
+            generated_output += response
+
+        print("Generated Suggested Questions JSON:", generated_output)
+
+    def _build_chat_history(self) -> list[ChatMessage]:
+        """
+        Builds and returns a list of chat history messages.
+        """
+        history_messages = []
+        for interaction in self._chat_history:  # Assuming self._chat_history holds the chat history
+            history_messages.append(
+                ChatMessage(content=interaction[0], role=MessageRole.USER)
+            )
+            if len(interaction) > 1 and interaction[1] is not None:
+                history_messages.append(
+                    ChatMessage(
+                        content=interaction[1].split(SOURCES_SEPARATOR)[0],
+                        role=MessageRole.ASSISTANT,
+                    )
+                )
+
+        # Limit history to a reasonable number to avoid overflow
+        return history_messages[:20]
 
     def _delete_all_files(self) -> Any:
         ingested_files = self._ingest_service.list_ingested()
@@ -377,7 +492,7 @@ class PrivateGptUi:
             "justify-content: center;"
             "align-items: center;"
             "}"
-            ".logo img { height: 35% }"
+            ".logo img { height: 55% }"
             ".contain { display: flex !important; flex-direction: column !important; }"
             "#component-0, #component-3, #component-10, #component-8  { height: 100% !important; }"
             "#chatbot { flex-grow: 1 !important; overflow: auto !important;}"
@@ -406,6 +521,25 @@ class PrivateGptUi:
                         max_lines=3,
                         interactive=False,
                     )
+
+                    # Dropdown for Quick Access in the sidebar
+                    quick_access_dropdown = gr.Dropdown(
+                        choices=[
+                            "What is the main issue or purpose of this document?",
+                            "Who are the involved parties, and what roles do they play?",
+                            "What is the final outcome or decision, and what does it imply?",
+                            "What are the key arguments or points of contention presented?",
+                            "What legal statutes, sections, or provisions are referenced, and how are they interpreted?",
+                            "What precedents or previous rulings are cited, and how do they influence this document?",
+                            "Are there any specific rights or obligations highlighted for any party involved?",
+                            "What broader societal or systemic issues are discussed or implied?",
+                            "What conditions, limitations, or exceptions are noted within the document?",
+                            "What recommendations, reforms, or actions are suggested or required?"
+                        ],
+                        label="Quick Access",
+                        elem_classes="sidebar-dropdown",  # Optional CSS class for custom styling
+                    )
+
                     upload_button = gr.components.UploadButton(
                         "Upload File(s)",
                         type="filepath",
@@ -430,6 +564,7 @@ class PrivateGptUi:
                         outputs=ingested_dataset,
                     )
                     ingested_dataset.render()
+
                     deselect_file_button = gr.components.Button(
                         "De-select selected file", size="sm", interactive=False
                     )
@@ -481,92 +616,135 @@ class PrivateGptUi:
                             selected_text,
                         ],
                     )
-                    system_prompt_input = gr.Textbox(
-                        placeholder=self._system_prompt,
-                        label="System Prompt",
-                        lines=2,
-                        interactive=True,
-                        render=False,
-                    )
-                    # When mode changes, set default system prompt, and other stuffs
-                    mode.change(
-                        self._set_current_mode,
-                        inputs=mode,
-                        outputs=[system_prompt_input, explanation_mode],
-                    )
-                    # On blur, set system prompt to use in queries
-                    system_prompt_input.blur(
-                        self._set_system_prompt,
-                        inputs=system_prompt_input,
-                    )
 
-                    def get_model_label() -> str | None:
-                        """Get model label from llm mode setting YAML.
-
-                        Raises:
-                            ValueError: If an invalid 'llm_mode' is encountered.
-
-                        Returns:
-                            str: The corresponding model label.
-                        """
-                        # Get model label from llm mode setting YAML
-                        # Labels: local, openai, openailike, sagemaker, mock, ollama
-                        config_settings = settings()
-                        if config_settings is None:
-                            raise ValueError("Settings are not configured.")
-
-                        # Get llm_mode from settings
-                        llm_mode = config_settings.llm.mode
-
-                        # Mapping of 'llm_mode' to corresponding model labels
-                        model_mapping = {
-                            "llamacpp": config_settings.llamacpp.llm_hf_model_file,
-                            "openai": config_settings.openai.model,
-                            "openailike": config_settings.openai.model,
-                            "azopenai": config_settings.azopenai.llm_model,
-                            "sagemaker": config_settings.sagemaker.llm_endpoint_name,
-                            "mock": llm_mode,
-                            "ollama": config_settings.ollama.llm_model,
-                            "gemini": config_settings.gemini.model,
-                        }
-
-                        if llm_mode not in model_mapping:
-                            print(f"Invalid 'llm mode': {llm_mode}")
-                            return None
-
-                        return model_mapping[llm_mode]
-
+                # Main chat panel column
                 with gr.Column(scale=7, elem_id="col"):
-                    # Determine the model label based on the value of PGPT_PROFILES
                     model_label = get_model_label()
-                    if model_label is not None:
-                        label_text = (
-                            f"LLM: {settings().llm.mode} | Model: {model_label}"
-                        )
-                    else:
-                        label_text = f"LLM: {settings().llm.mode}"
+                    label_text = (
+                        f"LLM: {settings().llm.mode} | Model: {model_label}"
+                        if model_label
+                        else f"LLM: {settings().llm.mode}"
+                    )
+                    gr.Markdown(f"### {label_text}")
+                    chatbot = gr.Chatbot(elem_id="chatbot", show_copy_button=True)
+                    chat_history = gr.State([])
 
-                    _ = gr.ChatInterface(
-                        self._chat,
-                        chatbot=gr.Chatbot(
-                            label=label_text,
-                            show_copy_button=True,
-                            elem_id="chatbot",
-                            render=False,
-                            avatar_images=(
-                                None,
-                                AVATAR_BOT,
-                            ),
-                        ),
-                        additional_inputs=[mode, upload_button, system_prompt_input],
+                    # Autofill input_box when dropdown option is selected
+
+                    # Suggestion buttons (initially hidden)
+                    suggestion_texts = [
+                        "What are the bail conditions?",
+                        "How does the co-accused's arrest impact the case?",
+                        "What cases support a speedy trial?",
+                    ]
+                    with gr.Row(visible=False) as suggestion_buttons_row:
+                        suggestion_button_1 = gr.Button(suggestion_texts[0])
+                        suggestion_button_2 = gr.Button(suggestion_texts[1])
+                        suggestion_button_3 = gr.Button(suggestion_texts[2])
+                    # Input box for the message
+                    input_box = gr.Textbox(
+                        show_label=False,
+                        placeholder="Type your message here...",
+                        lines=1,
+                        elem_id="input_box",
+                    )
+                    quick_access_dropdown.change(
+                        fn=lambda selected_option: selected_option,
+                        inputs=quick_access_dropdown,
+                        outputs=input_box,
                     )
 
-            with gr.Row():
-                avatar_byte = AVATAR_BOT.read_bytes()
-                f_base64 = f"data:image/png;base64,{base64.b64encode(avatar_byte).decode('utf-8')}"
-                gr.HTML(
-                    f"<div class='footer'><a class='footer-zylon-link' href='https://zylon.ai/'>Maintained by Yatharth <img class='footer-zylon-ico' src='{f_base64}' alt=Zylon></a></div>"
-                )
+                    with gr.Row():
+                        retry_button = gr.Button("Retry")
+                        undo_button = gr.Button("Undo")
+                        clear_button = gr.Button("Clear")
+
+                    # Attach click events to suggestion buttons
+                    def set_input_text(text):
+                        return text
+
+                    suggestion_button_1.click(
+                        fn=lambda: set_input_text(suggestion_texts[0]),
+                        inputs=[],
+                        outputs=input_box,
+                    )
+                    suggestion_button_2.click(
+                        fn=lambda: set_input_text(suggestion_texts[1]),
+                        inputs=[],
+                        outputs=input_box,
+                    )
+                    suggestion_button_3.click(
+                        fn=lambda: set_input_text(suggestion_texts[2]),
+                        inputs=[],
+                        outputs=input_box,
+                    )
+
+                    def user_message(message, history):
+                        # Append user message to history
+                        history = history + [[message, None]]
+                        # Update the chatbot immediately
+                        return "", history, history
+
+                    def bot_response(history, mode):
+                        # Get the last user message
+                        user_message = history[-1][0]
+                        # Initialize assistant's response in history
+                        history[-1][1] = ""
+                        # Call the _chat function
+                        response_generator = self._chat(user_message, history[:-1], mode)
+                        # For streaming outputs, we can use a generator function
+                        for response in response_generator:
+                            # Update the assistant's response in history
+                            history[-1][1] = response
+                            # Yield updated chat history to update chatbot
+                            yield history, history, gr.update(visible=False)
+                        # After the response is complete, show suggestions
+                        yield history, history, gr.update(visible=True)
+
+                    input_box.submit(
+                        user_message,
+                        inputs=[input_box, chat_history],
+                        outputs=[input_box, chat_history, chatbot],
+                    ).then(
+                        bot_response,
+                        inputs=[chat_history, mode],
+                        outputs=[chat_history, chatbot, suggestion_buttons_row],
+                    )
+                    def retry(history, mode):
+                        if len(history) == 0:
+                            return history, history, gr.update(visible=False)
+                        # Remove the last assistant response
+                        history[-1][1] = ""
+                        # Call bot_response again
+                        gen = bot_response(history, mode)
+                        return next(gen)
+
+                    retry_button.click(
+                        retry,
+                        inputs=[chat_history, mode],
+                        outputs=[chat_history, chatbot, suggestion_buttons_row],
+                    )
+
+                    def undo(history):
+                        if len(history) == 0:
+                            return history, history, gr.update(visible=False)
+                        # Remove the last user-assistant pair
+                        history = history[:-1] if len(history) >= 1 else []
+                        return history, history, gr.update(visible=False)
+
+                    undo_button.click(
+                        undo,
+                        inputs=chat_history,
+                        outputs=[chat_history, chatbot, suggestion_buttons_row],
+                    )
+
+                    def clear():
+                        return [], [], gr.update(visible=False)
+
+                    clear_button.click(
+                        clear,
+                        outputs=[chat_history, chatbot, suggestion_buttons_row],
+                    )
 
         return blocks
 
@@ -580,6 +758,43 @@ class PrivateGptUi:
         blocks.queue()
         logger.info("Mounting the gradio UI, at path=%s", path)
         gr.mount_gradio_app(app, blocks, path=path, favicon_path=AVATAR_BOT)
+
+
+def get_model_label() -> str | None:
+    """Get model label from llm mode setting YAML.
+
+    Raises:
+        ValueError: If an invalid 'llm_mode' is encountered.
+
+    Returns:
+        str: The corresponding model label.
+    """
+    # Get model label from llm mode setting YAML
+    # Labels: local, openai, openailike, sagemaker, mock, ollama
+    config_settings = settings()
+    if config_settings is None:
+        raise ValueError("Settings are not configured.")
+
+    # Get llm_mode from settings
+    llm_mode = config_settings.llm.mode
+
+    # Mapping of 'llm_mode' to corresponding model labels
+    model_mapping = {
+        "llamacpp": config_settings.llamacpp.llm_hf_model_file,
+        "openai": config_settings.openai.model,
+        "openailike": config_settings.openai.model,
+        "azopenai": config_settings.azopenai.llm_model,
+        "sagemaker": config_settings.sagemaker.llm_endpoint_name,
+        "mock": llm_mode,
+        "ollama": config_settings.ollama.llm_model,
+        "gemini": config_settings.gemini.model,
+    }
+
+    if llm_mode not in model_mapping:
+        logger.error(f"Invalid 'llm mode': {llm_mode}")
+        return None
+
+    return model_mapping[llm_mode]
 
 
 if __name__ == "__main__":
