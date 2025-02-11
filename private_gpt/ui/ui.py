@@ -322,96 +322,96 @@ class PrivateGptUi:
 
         # Generate summaries and save them as .txt files in the specified directory
 
-        SUMMARY_OUTPUT_DIR = Path("/Users/sameer/Desktop/private-gpt/summaries/")
-        SUMMARY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+        # SUMMARY_OUTPUT_DIR = Path("/Users/sameer/Desktop/private-gpt/summaries/")
+        # SUMMARY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
 
-        for path in paths:
-            self._selected_filename = path.name  # Set the file as selected for context
-            summary_text = self._get_summary_text()
-            summary_file_path = (
-                SUMMARY_OUTPUT_DIR / f"{path.stem}.txt"
-            )  # Save in the summaries directory
+        # for path in paths:
+        #     self._selected_filename = path.name  # Set the file as selected for context
+        #     summary_text = self._get_summary_text()
+        #     summary_file_path = (
+        #         SUMMARY_OUTPUT_DIR / f"{path.stem}.txt"
+        #     )  # Save in the summaries directory
 
-            # Write the summary to a .txt file in the specified directory
-            with summary_file_path.open("w", encoding="utf-8") as summary_file:
-                summary_file.write(summary_text)
+        #     # Write the summary to a .txt file in the specified directory
+        #     with summary_file_path.open("w", encoding="utf-8") as summary_file:
+        #         summary_file.write(summary_text)
 
-            logger.info(f"Summary saved to {summary_file_path}")
+        #     logger.info(f"Summary saved to {summary_file_path}")
 
-    def _get_summary_text(self) -> str:
-        """
-        Generates and returns the summary text of the selected file.
-        """
-        if not self._selected_filename:
-            logger.warning("No file selected for summarization.")
-            return "No file selected."
+    # def _get_summary_text(self) -> str:
+    #     """
+    #     Generates and returns the summary text of the selected file.
+    #     """
+    #     if not self._selected_filename:
+    #         logger.warning("No file selected for summarization.")
+    #         return "No file selected."
 
-        # Set up a context filter based on the selected file
-        context_filter = None
-        docs_ids = []
-        for ingested_document in self._ingest_service.list_ingested():
-            if (
-                ingested_document.doc_metadata
-                and ingested_document.doc_metadata["file_name"] == self._selected_filename
-            ):
-                docs_ids.append(ingested_document.doc_id)
-        if docs_ids:
-            context_filter = ContextFilter(docs_ids=docs_ids)
+    #     # Set up a context filter based on the selected file
+    #     context_filter = None
+    #     docs_ids = []
+    #     for ingested_document in self._ingest_service.list_ingested():
+    #         if (
+    #             ingested_document.doc_metadata
+    #             and ingested_document.doc_metadata["file_name"] == self._selected_filename
+    #         ):
+    #             docs_ids.append(ingested_document.doc_id)
+    #     if docs_ids:
+    #         context_filter = ContextFilter(docs_ids=docs_ids)
 
-        # Use the summarize service to get the summary stream
-        summary_stream = self._summarize_service.stream_summarize(
-            use_context=True,
-            context_filter=context_filter,
-            instructions="Summarize the content of the selected file.",
-        )
+    #     # Use the summarize service to get the summary stream
+    #     summary_stream = self._summarize_service.stream_summarize(
+    #         use_context=True,
+    #         context_filter=context_filter,
+    #         instructions="Summarize the content of the selected file.",
+    #     )
 
-        # Collect the streamed summary response
-        full_summary = ""
-        for token in summary_stream:
-            full_summary += str(token)
+    #     # Collect the streamed summary response
+    #     full_summary = ""
+    #     for token in summary_stream:
+    #         full_summary += str(token)
 
-        return full_summary
-    def generate_suggested_questions(self) -> None:
-        """
-        Generates 3 suggested questions based on the summary and chat history.
-        Prints the JSON output to the console.
-        """
-        # Step 1: Get the summary of the selected document
-        if not self._selected_filename:
-            logger.warning("No file selected for summarization.")
-            return
+    #     return full_summary
+    # def generate_suggested_questions(self) -> None:
+    #     """
+    #     Generates 3 suggested questions based on the summary and chat history.
+    #     Prints the JSON output to the console.
+    #     """
+    #     # Step 1: Get the summary of the selected document
+    #     if not self._selected_filename:
+    #         logger.warning("No file selected for summarization.")
+    #         return
 
-        summary_text = self._get_summary_text()
+    #     # summary_text = self._get_summary_text()
 
-        # Step 2: Retrieve the chat history
-        history_messages = self._build_chat_history()
+    #     # Step 2: Retrieve the chat history
+    #     history_messages = self._build_chat_history()
 
-        # Step 3: Format the prompt with summary and chat history
-        prompt_instruction = (
-            f"Based on the summary and the chat history draft 3 suggested questions "
-            f"that the user might want to ask next. Give them in a JSON format like this: "
-            f'{{"question1":"", "question2":"", "question3":""}}. '
-            f"Nothing else should be generated. Your response should only be the JSON.\n\n"
-            f"Summary:\n{summary_text}\n\nChat History:\n"
-        )
+    #     # Step 3: Format the prompt with summary and chat history
+    #     prompt_instruction = (
+    #         f"Based on the summary and the chat history draft 3 suggested questions "
+    #         f"that the user might want to ask next. Give them in a JSON format like this: "
+    #         f'{{"question1":"", "question2":"", "question3":""}}. '
+    #         f"Nothing else should be generated. Your response should only be the JSON.\n\n"
+    #         f"Summary:\n{summary_text}\n\nChat History:\n"
+    #     )
 
-        # Add the user-assistant exchanges to the prompt
-        for message in history_messages:
-            role = "User" if message.role == MessageRole.USER else "Assistant"
-            prompt_instruction += f"{role}: {message.content}\n"
+    #     # Add the user-assistant exchanges to the prompt
+    #     for message in history_messages:
+    #         role = "User" if message.role == MessageRole.USER else "Assistant"
+    #         prompt_instruction += f"{role}: {message.content}\n"
 
-        # Step 4: Send prompt to LLM in BASIC_CHAT_MODE and print the response
-        response_generator = self._chat_service.stream_chat(
-            messages=[ChatMessage(content=prompt_instruction, role=MessageRole.USER)],
-            use_context=False,
-        )
+    #     # Step 4: Send prompt to LLM in BASIC_CHAT_MODE and print the response
+    #     response_generator = self._chat_service.stream_chat(
+    #         messages=[ChatMessage(content=prompt_instruction, role=MessageRole.USER)],
+    #         use_context=False,
+    #     )
 
-        # Collect and print the response
-        generated_output = ""
-        for response in response_generator:
-            generated_output += response
+    #     # Collect and print the response
+    #     generated_output = ""
+    #     for response in response_generator:
+    #         generated_output += response
 
-        print("Generated Suggested Questions JSON:", generated_output)
+    #     print("Generated Suggested Questions JSON:", generated_output)
 
     def _build_chat_history(self) -> list[ChatMessage]:
         """
